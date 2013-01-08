@@ -27,7 +27,7 @@
 #import <QuartzCore/QuartzCore.h>
 
 NSString * const EGOTextAttachmentAttributeName = @"com.enormego.EGOTextAttachmentAttribute";
-NSString * const EGOTextAttachmentPlaceholderString = @"\uFFFC";
+NSString * const EGOTextAttachmentPlaceholderString = @"\ufffc";
 NSString * const EGOTextAttachmentOriginStringKey = @"com.enormego.EGOTextAttachmentOriginString";
 
 typedef enum {
@@ -221,7 +221,6 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
 
 @synthesize delegate;
 @synthesize attributedString=_attributedString;
-@synthesize text=_text;
 @synthesize font=_font;
 @synthesize editable=_editable;
 @synthesize markedRange=_markedRange;
@@ -255,6 +254,7 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
     self.backgroundColor = [UIColor whiteColor];
     self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.clipsToBounds = YES;
+    self.autocorrectionType = UITextAutocorrectionTypeNo;
     
     EGOContentView *contentView = [[EGOContentView alloc] initWithFrame:CGRectInset(self.bounds, 8.0f, 8.0f)];
     contentView.autoresizingMask = self.autoresizingMask;
@@ -281,7 +281,7 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
     [singleTap release];
     
     _selectedRange = NSMakeRange(0, 0);
-    _markedRange = NSMakeRange(0, 0);
+    _markedRange = NSMakeRange(NSNotFound, 0);
     
     self.leftDelimiter = @"\\[";
     self.rightDelimiter = @"\\]";
@@ -404,7 +404,7 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
 }
 
 - (NSString *)text {
-    return _attributedString.string;
+    return [self convertAttributedStringToString:self.attributedString];
 }
 
 - (void)setFont:(UIFont *)font {
@@ -481,7 +481,9 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
         _textChecker = [[UITextChecker alloc] init];
         _mutableAttributedString = [[NSMutableAttributedString alloc] init];
         
-        NSDictionary *dictionary = [[NSDictionary alloc] initWithObjectsAndKeys:[NSNumber numberWithInt:(int)(kCTUnderlineStyleThick|kCTUnderlinePatternDot)], kCTUnderlineStyleAttributeName, (id)[UIColor colorWithRed:1.0f green:0.0f blue:0.0f alpha:1.0f].CGColor, kCTUnderlineColorAttributeName, nil];
+        NSDictionary *dictionary = [[NSDictionary alloc] initWithObjectsAndKeys:
+                                    [NSNumber numberWithInt:(int)(kCTUnderlineStyleThick|kCTUnderlinePatternDot)], kCTUnderlineStyleAttributeName,
+                                    (id)[UIColor colorWithRed:1.0f green:0.0f blue:0.0f alpha:1.0f].CGColor, kCTUnderlineColorAttributeName, nil];
         self.correctionAttributes = dictionary;
         [dictionary release];
         
@@ -839,13 +841,16 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
         
         __block CTLineRef line = (CTLineRef)[lines objectAtIndex:i];
         CFRange cfRange = CTLineGetStringRange(line);
-        NSRange range = NSMakeRange(cfRange.location == kCFNotFound ? NSNotFound : cfRange.location, cfRange.length == kCFNotFound ? 0 : cfRange.length);
+        NSRange range = NSMakeRange(cfRange.location == kCFNotFound ? NSNotFound : cfRange.location,
+                                    cfRange.length == kCFNotFound ? 0 : cfRange.length);
         
         if (index >= range.location && index <= range.location+range.length) {
             
             if (range.length > 1) {
                 
-                [_attributedString.string enumerateSubstringsInRange:range options:NSStringEnumerationByWords usingBlock:^(NSString *subString, NSRange subStringRange, NSRange enclosingRange, BOOL *stop){
+                [_attributedString.string enumerateSubstringsInRange:range
+                                                             options:NSStringEnumerationByWords
+                                                          usingBlock:^(NSString *subString, NSRange subStringRange, NSRange enclosingRange, BOOL *stop){
                     
                     if (index - subStringRange.location <= subStringRange.length) {
                         returnRange = subStringRange;
@@ -1130,6 +1135,14 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
     return color;
 }
 
++ (UIColor*)markedTextColor {
+    static UIColor *color = nil;
+    if (color == nil) {
+        color = [[UIColor colorWithRed:0.800f green:0.867f blue:0.929f alpha:1.0f] retain];
+    }
+    return color;
+}
+
 + (UIColor*)caretColor {
     static UIColor *color = nil;
     if (color == nil) {
@@ -1179,6 +1192,44 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
 
 // MARK: UITextInput - Working with Marked and Selected Text
 
+- (NSArray *)selectionRectsForRange:(UITextRange *)range
+{
+    NSMutableArray *pathRects = [[NSMutableArray alloc] init];
+    NSArray *lines = (NSArray*)CTFrameGetLines(_frame);
+    CGPoint *origins = (CGPoint*)malloc([lines count] * sizeof(CGPoint));
+    CTFrameGetLineOrigins(_frame, CFRangeMake(0, [lines count]), origins);
+    NSInteger count = [lines count];
+    
+    for (int i = 0; i < count; i++) {
+        
+        CTLineRef line = (CTLineRef) [lines objectAtIndex:i];
+        CFRange lineRange = CTLineGetStringRange(line);
+        NSRange range1 = NSMakeRange(lineRange.location==kCFNotFound ? NSNotFound : lineRange.location, lineRange.length);
+        NSRange intersection = [self rangeIntersection:range1 withSecond:((EGOIndexedRange*)range).range];
+        
+        if (intersection.location != NSNotFound && intersection.length > 0) {
+            
+            CGFloat xStart = CTLineGetOffsetForStringIndex(line, intersection.location, NULL);
+            CGFloat xEnd = CTLineGetOffsetForStringIndex(line, intersection.location + intersection.length, NULL);
+            
+            CGPoint origin = origins[i];
+            CGFloat ascent, descent;
+            CTLineGetTypographicBounds(line, &ascent, &descent, NULL);
+            
+            CGRect selectionRect = CGRectMake(origin.x + xStart, origin.y - descent, xEnd - xStart, ascent + descent);
+            
+            if (((EGOIndexedRange*)range).range.length==1) {
+                selectionRect.size.width = _textContentView.bounds.size.width;
+            }
+            
+            [pathRects addObject:[NSValue valueWithCGRect:selectionRect]];
+            
+        }
+    }
+    free(origins);
+    return pathRects;
+}
+
 - (UITextRange *)selectedTextRange {
     return [EGOIndexedRange rangeWithNSRange:self.selectedRange];
 }
@@ -1215,7 +1266,8 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
         
         NSAttributedString *string = [[NSAttributedString alloc] initWithString:markedText
                                                                      attributes:self.currentAttributes];
-        [_mutableAttributedString insertAttributedString:string atIndex:selectedNSRange.location];
+        [_mutableAttributedString insertAttributedString:string
+                                                 atIndex:selectedNSRange.location];
         [string release];
         
         markedTextRange.location = selectedNSRange.location;
@@ -1531,7 +1583,8 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
         
     } else if (selectedNSRange.length > 0) {
         
-        [_mutableAttributedString replaceCharactersInRange:selectedNSRange withAttributedString:newString];
+        [_mutableAttributedString replaceCharactersInRange:selectedNSRange
+                                      withAttributedString:newString];
         selectedNSRange.length = 0;
         selectedNSRange.location = (selectedNSRange.location + newString.length);
         
@@ -1547,7 +1600,7 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
     self.markedRange = markedTextRange;
     self.selectedRange = selectedNSRange;
     
-    if (text.length > 1 || ([text isEqualToString:@" "] || [text isEqualToString:@"\n"])) {
+    if ([text isEqualToString:@" "] || [text isEqualToString:@"\n"]) {
         [self checkSpellingForRange:[self characterRangeAtIndex:self.selectedRange.location-1]];
         [self checkLinksForRange:NSMakeRange(0, self.attributedString.length)];
     }
@@ -1555,7 +1608,9 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
 
 - (void)deleteBackward  {
     
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(showCorrectionMenuWithoutSelection) object:nil];
+    [NSObject cancelPreviousPerformRequestsWithTarget:self
+                                             selector:@selector(showCorrectionMenuWithoutSelection)
+                                               object:nil];
     
     NSRange selectedNSRange = self.selectedRange;
     NSRange markedTextRange = self.markedRange;
@@ -1593,7 +1648,9 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
         NSInteger index = MAX(0, selectedNSRange.location-1);
         index = MIN(_attributedString.length-1, index);
         if ([_attributedString.string characterAtIndex:index] == ' ') {
-            [self performSelector:@selector(showCorrectionMenuWithoutSelection) withObject:nil afterDelay:0.2f];
+            [self performSelector:@selector(showCorrectionMenuWithoutSelection)
+                       withObject:nil
+                       afterDelay:0.2f];
         }
         
         selectedNSRange.location--;
@@ -1804,7 +1861,7 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
                                        
                                        CTRunDelegateRef Rundelegate = CTRunDelegateCreate(&callbacks, [image retain]); //3
                                        
-                                       NSMutableDictionary *attrDictionaryDelegate = [NSMutableDictionary dictionary];
+                                       NSMutableDictionary *attrDictionaryDelegate = [NSMutableDictionary dictionaryWithDictionary:self.currentAttributes];
                                        [attrDictionaryDelegate setObject:image
                                                                   forKey:EGOTextAttachmentAttributeName];
                                        [attrDictionaryDelegate setObject:(id)Rundelegate
@@ -1832,8 +1889,12 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
                        options: 0
                     usingBlock: ^(id value, NSRange range, BOOL *stop) {
                         if (value != nil) {
+                            NSMutableArray *arr = [NSMutableArray arrayWithCapacity:range.length];
+                            for (int i=0; i<range.length; ++i) {
+                                [arr addObject:value];
+                            }
                             [mutableString replaceCharactersInRange:NSMakeRange(range.location + mutableString.length - string.length, range.length)
-                                                         withString:value];
+                                                         withString:[arr componentsJoinedByString:@""]];
                         }
                     }];
     return [NSString stringWithString:mutableString];
@@ -1882,7 +1943,11 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
     
     while (!done) {
         
-        currentRange = [_textChecker rangeOfMisspelledWordInString:string range:stringRange startingAt:currentOffset wrap:NO language:language];
+        currentRange = [_textChecker rangeOfMisspelledWordInString:string
+                                                             range:stringRange
+                                                        startingAt:currentOffset
+                                                              wrap:NO
+                                                          language:language];
         
         if (currentRange.location == NSNotFound || currentRange.location > range.location) {
             done = YES;
@@ -2001,11 +2066,15 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
             
             if (gesture.state == UIGestureRecognizerStateBegan) {
                 
-                [_textWindow showFromView:_textContentView rect:[_textContentView convertRect:rect toView:_textWindow]];
+                [_textWindow showFromView:_textContentView
+                                     rect:[_textContentView convertRect:rect
+                                                                 toView:_textWindow]];
                 
             } else {
                 
-                [_textWindow renderWithContentView:_textContentView fromRect:[_textContentView convertRect:rect toView:_textWindow]];
+                [_textWindow renderWithContentView:_textContentView
+                                          fromRect:[_textContentView convertRect:rect
+                                                                          toView:_textWindow]];
                 
             }
             
@@ -2141,7 +2210,8 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
     if (gestureRecognizer==_longPress) {
         
         if (_selectedRange.length>0 && _selectionView!=nil) {
-            return CGRectContainsPoint(CGRectInset([_textContentView convertRect:_selectionView.frame toView:self], -20.0f, -20.0f) , [gestureRecognizer locationInView:self]);
+            return CGRectContainsPoint(CGRectInset([_textContentView convertRect:_selectionView.frame
+                                                                          toView:self], -20.0f, -20.0f) , [gestureRecognizer locationInView:self]);
         }
         
     }
@@ -2291,7 +2361,11 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
             NSString *language = [[UITextChecker availableLanguages] objectAtIndex:0];
             if (!language)
                 language = @"en_US";
-            self.correctionRange = [_textChecker rangeOfMisspelledWordInString:_attributedString.string range:range startingAt:0 wrap:YES language:language];
+            self.correctionRange = [_textChecker rangeOfMisspelledWordInString:_attributedString.string
+                                                                         range:range
+                                                                    startingAt:0
+                                                                          wrap:YES
+                                                                      language:language];
             
         }
     }
@@ -2332,7 +2406,9 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
         language = @"en_US";
     }
     
-    NSArray *guesses = [_textChecker guessesForWordRange:range inString:_attributedString.string language:language];
+    NSArray *guesses = [_textChecker guessesForWordRange:range
+                                                inString:_attributedString.string
+                                                language:language];
     
     [menuController setTargetRect:[self menuPresentationRect] inView:self];
     
@@ -2593,8 +2669,12 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
 }
 
 - (void)drawRect:(CGRect)rect {
-    
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    CGContextSaveGState(context);
+    //CGContextTranslateCTM(context, rect.origin.x, rect.origin.y);
+    //CGContextScaleCTM(context, 1, -1);
     [_delegate drawContentInRect:rect];
+    CGContextRestoreGState(context);
     
 }
 
