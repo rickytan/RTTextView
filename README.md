@@ -11,6 +11,7 @@
 *  Support Copy and Paste
 
 **Acknowledgement**:
+
 Thanks to the OpenSource Project [EGOTextView](https://github.com/enormego/EGOTextView) which makes this work possible.
 
 ![Screenshot0](http://dl.dropbox.com/u/46239535/RTTextView/screenshot0.png)
@@ -18,9 +19,13 @@ Thanks to the OpenSource Project [EGOTextView](https://github.com/enormego/EGOTe
 ![Screenshot1](http://dl.dropbox.com/u/46239535/RTTextView/screenshot1.png)
 
 If you setup a textimagemap to
+
 {
+
   "eat" : "eat-rice.png",
+  
   "happy" : "smile-face.png"
+
 }
 
 and leftDelimiter = "\\(", rightDelimiter = "\\)", it will show image "eat-rice.png" if you inserted text "(eat)". 
