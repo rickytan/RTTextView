@@ -231,7 +231,7 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
 @synthesize correctionAttributes=_correctionAttributes;
 @synthesize markedTextStyle=_markedTextStyle;
 @synthesize inputDelegate=_inputDelegate;
-@synthesize menuItemActions;
+@synthesize menuItemActions = _menuItemActions;
 @synthesize textImageMapping = _textImageMapping;
 @synthesize shouldDetectImageWhileTyping = _shouldDetectImageWhileTyping;
 
@@ -255,9 +255,10 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
     self.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     self.clipsToBounds = YES;
     self.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.dataDetectorTypes = UIDataDetectorTypeLink;
     
     EGOContentView *contentView = [[EGOContentView alloc] initWithFrame:CGRectInset(self.bounds, 8.0f, 8.0f)];
-    contentView.autoresizingMask = self.autoresizingMask;
+    contentView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     contentView.delegate = self;
     [self addSubview:contentView];
     _textContentView = [contentView retain];
@@ -304,7 +305,9 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
 }
 
 - (id)init {
-    if ((self = [self initWithFrame:CGRectZero])) {}
+    if ((self = [self initWithFrame:CGRectZero])) {
+        
+    }
     return self;
 }
 
@@ -1602,7 +1605,8 @@ static CGFloat AttachmentRunDelegateGetWidth(void *refCon) {
     
     if ([text isEqualToString:@" "] || [text isEqualToString:@"\n"]) {
         [self checkSpellingForRange:[self characterRangeAtIndex:self.selectedRange.location-1]];
-        [self checkLinksForRange:NSMakeRange(0, self.attributedString.length)];
+        if (self.dataDetectorTypes & UIDataDetectorTypeLink)
+            [self checkLinksForRange:NSMakeRange(0, self.attributedString.length)];
     }
 }
 
